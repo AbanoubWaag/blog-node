@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Post</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<nav>
+  <a href="/" style="font-weight:700;font-size:1.1rem">Blog</a>
+  <div id="nav-auth"></div>
+</nav>
+<div class="container">
+  <div id="post-container"><p class="loading">Loading…</p></div>
+  <div class="comments-section" id="comments-section" style="display:none">
+    <div class="comments-header">
+      <h3>Comments <span id="comment-count" class="comment-count"></span></h3>
+    </div>
+    <div id="comment-input-area"></div>
+    <div id="comments-list"></div>
+  </div>
+</div>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="/js/api.js"></script>
+<script>
+  renderNav();
+  const params = new URLSearchParams(location.search);
+  const postId = params.get('id');
+  const user   = getUser();
+  const socket = io();
+  socket.emit('join_post', postId);
+
+  // ── Render helpers ──────────────────────────────────────────────
+
+  const renderReply = (r, commentId) => {
+    const isOwner = user && (user.id === r.author._id?.toString() || user.role === 'admin');
+    const liked   = user && r.likes?.some(id => id.toString() === user.id);
+    return `<div class="reply-item" id="reply-${r._id}">
+      <div class="reply-avatar">${r.author.name[0].toUpperCase()}</div>
+      <div class="reply-body">
+        <div class="reply-meta">
+          <span class="reply-author">${r.author.name}</span>
+          <span class="reply-time">${timeAgo(r.createdAt)}</span>
+        </div>
+        <div class="reply-text">${escHtml(r.content)}</div>
+        <div class="reply-actions">
+          ${user ? `<button class="action-btn like-action ${liked ? 'liked' : ''}" onclick="toggleReplyLike('${commentId}','${r._id}',this)">
+            <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+            <span>${r.likes?.length || 0}</span>
+          </button>` : ''}
+          ${isOwner ? `<button class="action-btn delete-action" onclick="deleteReply('${commentId}','${r._id}')">Delete</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+  };
+
+  const renderComment = (c) => {
+    const isOwner = user && (user.id === c.author._id?.toString() || user.role === 'admin');
+    const liked   = user && c.likes?.some(id => id.toString() === user.id);
+    const replies = (c.replies || []).map(r => renderReply(r, c._id)).join('');
+    return `<div class="comment-item" id="comment-${c._id}">
+      <div class="comment-avatar">${c.author.name[0].toUpperCase()}</div>
+      <div class="comment-body">
+        <div class="comment-meta">
+          <span class="comment-author">${c.author.name}</span>
+          <span class="comment-time">${timeAgo(c.createdAt)}</span>
+        </div>
+        <div class="comment-text">${escHtml(c.content)}</div>
+        <div class="comment-actions">
+          ${user ? `<button class="action-btn like-action ${liked ? 'liked' : ''}" onclick="toggleCommentLike('${c._id}',this)">
+            <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+            <span>${c.likes?.length || 0}</span>
+          </button>
+          <button class="action-btn reply-action" onclick="toggleReplyBox('${c._id}')">Reply</button>` : ''}
+          ${isOwner ? `<button class="action-btn delete-action" onclick="deleteComment('${c._id}')">Delete</button>` : ''}
+        </div>
+        <div class="reply-box" id="reply-box-${c._id}" style="display:none">
+          <div class="reply-form">
+            <input type="text" id="reply-input-${c._id}" placeholder="Write a reply…">
+            <button class="btn btn-primary btn-sm" onclick="submitReply('${c._id}')">Reply</button>
+          </div>
+        </div>
+        <div class="replies-list" id="replies-${c._id}">${replies}</div>
+      </div>
+    </div>`;
+  };
+
+  // ── Utilities ───────────────────────────────────────────────────
+
+  const escHtml = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  const timeAgo = (date) => {
+    const s = Math.floor((Date.now() - new Date(date)) / 1000);
+    if (s < 60)   return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s/60)}m ago`;
+    if (s < 86400)return `${Math.floor(s/3600)}h ago`;
+    return new Date(date).toLocaleDateString();
+  };
+
+  const updateCommentCount = (n) => {
+    document.getElementById('comment-count').textContent = n > 0 ? `(${n})` : '';
+  };
+
+  // ── Load ────────────────────────────────────────────────────────
+
+  const loadComments = async () => {
+    const comments = await api(`/posts/${postId}/comments`);
+    const list = document.getElementById('comments-list');
+    list.innerHTML = comments.length
+      ? comments.map(renderComment).join('')
+      : '<p class="no-comments">No comments yet. Be the first!</p>';
+    updateCommentCount(comments.length);
+  };
+
+  const loadPost = async () => {
+    try {
+      const post = await api(`/posts/${postId}`);
+      const liked = user && post.likes.some(id => id.toString() === user.id);
+      document.title = post.title;
+      document.getElementById('post-container').innerHTML = `
+        <div class="post-detail">
+          ${post.photo ? `<img src="${post.photo}" alt="${post.title}">` : ''}
+          <div class="post-detail-body">
+            <div class="post-tags-row">
+              <span class="post-tag">Article</span>
+              <span class="post-date">${new Date(post.createdAt).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})}</span>
+            </div>
+            <h1 class="post-title">${post.title}</h1>
+            <div class="post-author-row">
+              <div class="post-author-avatar">${post.author?.name[0].toUpperCase()}</div>
+              <div>
+                <div class="post-author-name">${post.author?.name}</div>
+                <div class="post-author-sub">Author</div>
+              </div>
+            </div>
+            <div class="post-content">${post.content}</div>
+            <div class="post-footer">
+              <button id="like-btn" class="like-btn ${liked ? 'liked' : ''}" onclick="toggleLike()">
+                <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                <span id="like-count">${post.likes.length}</span>
+              </button>
+              ${user && (user.role === 'admin' || user.id === post.author?._id?.toString()) ? `
+                <div class="post-admin-actions">
+                  <a href="/pages/post-form.html?id=${post._id}" class="btn btn-outline btn-sm">Edit</a>
+                  <button class="btn btn-danger btn-sm" onclick="deletePost()">Delete</button>
+                </div>` : ''}
+            </div>
+          </div>
+        </div>`;
+      document.getElementById('comments-section').style.display = 'block';
+      await loadComments();
+      document.getElementById('comment-input-area').innerHTML = user
+        ? `<div class="new-comment-form">
+            <div class="new-comment-avatar">${user.name[0].toUpperCase()}</div>
+            <div class="new-comment-input-wrap">
+              <input type="text" id="comment-input" placeholder="Write a comment…">
+              <button class="btn btn-primary btn-sm" onclick="submitComment()">Post</button>
+            </div>
+           </div>`
+        : `<p class="login-prompt"><a href="/pages/login.html">Login</a> to comment or like.</p>`;
+    } catch (err) {
+      document.getElementById('post-container').innerHTML = `<p class="alert alert-error">${err.message}</p>`;
+    }
+  };
+
+  // ── Actions ─────────────────────────────────────────────────────
+
+  const toggleLike = async () => {
+    if (!user) return window.location.href = '/pages/login.html';
+    const data = await api(`/posts/${postId}/like`, { method: 'POST' });
+    updateLikeUI(data.likes, data.liked);
+  };
+
+  const updateLikeUI = (count, liked) => {
+    const btn = document.getElementById('like-btn');
+    if (!btn) return;
+    btn.className = `like-btn ${liked ? 'liked' : ''}`;
+    btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg><span id="like-count">${count}</span>`;
+  };
+
+  const submitComment = async () => {
+    const input = document.getElementById('comment-input');
+    const content = input.value.trim();
+    if (!content) return;
+    input.disabled = true;
+    try {
+      await api(`/posts/${postId}/comments`, { method: 'POST', body: JSON.stringify({ content }) });
+      input.value = '';
+    } finally { input.disabled = false; input.focus(); }
+  };
+
+  const deleteComment = async (id) => {
+    if (!confirm('Delete this comment?')) return;
+    await api(`/comments/${id}`, { method: 'DELETE' });
+    document.getElementById(`comment-${id}`)?.remove();
+    const list = document.getElementById('comments-list');
+    const count = list.querySelectorAll('.comment-item').length;
+    updateCommentCount(count);
+    if (!count) list.innerHTML = '<p class="no-comments">No comments yet. Be the first!</p>';
+  };
+
+  const toggleCommentLike = async (id, btn) => {
+    const data = await api(`/comments/${id}/like`, { method: 'POST' });
+    btn.className = `action-btn like-action ${data.liked ? 'liked' : ''}`;
+    btn.querySelector('span').textContent = data.likes;
+  };
+
+  const toggleReplyBox = (commentId) => {
+    const box = document.getElementById(`reply-box-${commentId}`);
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    if (box.style.display === 'block') document.getElementById(`reply-input-${commentId}`)?.focus();
+  };
+
+  const submitReply = async (commentId) => {
+    const input = document.getElementById(`reply-input-${commentId}`);
+    const content = input.value.trim();
+    if (!content) return;
+    input.disabled = true;
+    try {
+      const reply = await api(`/comments/${commentId}/replies`, { method: 'POST', body: JSON.stringify({ content }) });
+      input.value = '';
+      document.getElementById(`reply-box-${commentId}`).style.display = 'none';
+      const repliesList = document.getElementById(`replies-${commentId}`);
+      repliesList.insertAdjacentHTML('beforeend', renderReply(reply, commentId));
+    } finally { input.disabled = false; }
+  };
+
+  const deleteReply = async (commentId, replyId) => {
+    if (!confirm('Delete this reply?')) return;
+    await api(`/comments/${commentId}/replies/${replyId}`, { method: 'DELETE' });
+    document.getElementById(`reply-${replyId}`)?.remove();
+  };
+
+  const toggleReplyLike = async (commentId, replyId, btn) => {
+    const data = await api(`/comments/${commentId}/replies/${replyId}/like`, { method: 'POST' });
+    btn.className = `action-btn like-action ${data.liked ? 'liked' : ''}`;
+    btn.querySelector('span').textContent = data.likes;
+  };
+
+  const deletePost = async () => {
+    if (!confirm('Delete this post?')) return;
+    await api(`/posts/${postId}`, { method: 'DELETE' });
+    window.location.href = '/';
+  };
+
+  // ── Sockets ─────────────────────────────────────────────────────
+
+  socket.on('new_comment', (comment) => {
+    const list = document.getElementById('comments-list');
+    list.querySelector('.no-comments')?.remove();
+    list.insertAdjacentHTML('beforeend', renderComment(comment));
+    updateCommentCount(list.querySelectorAll('.comment-item').length);
+  });
+
+  socket.on('new_reply', ({ commentId, reply }) => {
+    const repliesList = document.getElementById(`replies-${commentId}`);
+    if (repliesList) repliesList.insertAdjacentHTML('beforeend', renderReply(reply, commentId));
+  });
+
+  socket.on('like_updated', ({ likes }) => {
+    const btn = document.getElementById('like-btn');
+    if (!btn) return;
+    updateLikeUI(likes, btn.classList.contains('liked'));
+  });
+
+  loadPost();
+</script>
+</body>
+</html>

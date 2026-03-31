@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Blog</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<nav>
+  <a href="/" style="font-weight:700;font-size:1.1rem">Blog</a>
+  <div id="nav-auth"></div>
+</nav>
+<div class="container">
+  <div id="posts" class="posts-grid"><p class="loading">Loading posts…</p></div>
+  <div class="pagination" id="pagination"></div>
+</div>
+<script src="/js/api.js"></script>
+<script>
+  renderNav();
+  let currentPage = 1;
+
+  const renderPosts = (posts) => {
+    const el = document.getElementById('posts');
+    if (!posts.length) { el.innerHTML = '<p>No posts yet.</p>'; return; }
+    el.innerHTML = posts.map(p => `
+      <a href="/pages/post.html?id=${p._id}" style="text-decoration:none;color:inherit">
+        <div class="card">
+          ${p.photo ? `<img src="${p.photo}" alt="${p.title}">` : ''}
+          <div class="card-body">
+            <h2>${p.title}</h2>
+            <p>By ${p.author?.name || 'Unknown'} · ${new Date(p.createdAt).toLocaleDateString()}</p>
+          </div>
+        </div>
+      </a>`).join('');
+  };
+
+  const renderPagination = (page, pages) => {
+    const el = document.getElementById('pagination');
+    el.innerHTML = '';
+    if (pages <= 1) return;
+    if (page > 1) el.innerHTML += `<button class="btn btn-outline" onclick="loadPosts(${page-1})">← Prev</button>`;
+    el.innerHTML += `<span style="padding:.4rem .5rem">${page} / ${pages}</span>`;
+    if (page < pages) el.innerHTML += `<button class="btn btn-outline" onclick="loadPosts(${page+1})">Next →</button>`;
+  };
+
+  const loadPosts = async (page = 1) => {
+    currentPage = page;
+    try {
+      const data = await api(`/posts?page=${page}&limit=9`);
+      renderPosts(data.posts);
+      renderPagination(data.page, data.pages);
+    } catch (err) {
+      document.getElementById('posts').innerHTML = `<p class="alert alert-error">${err.message}</p>`;
+    }
+  };
+
+  loadPosts();
+</script>
+</body>
+</html>

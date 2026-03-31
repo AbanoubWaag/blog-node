@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Post Form</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<nav>
+  <a href="/" style="font-weight:700;font-size:1.1rem">Blog</a>
+  <div id="nav-auth"></div>
+</nav>
+<div class="container">
+  <div class="post-form-wrap">
+
+    <!-- Import from URL -->
+    <div class="import-box" id="import-box">
+      <div class="import-box-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        <span>Import article from URL</span>
+      </div>
+      <div class="import-row">
+        <input type="url" id="import-url" placeholder="https://example.com/article…">
+        <button class="btn btn-outline" id="import-btn" onclick="importFromUrl()">Import</button>
+      </div>
+      <div id="import-status"></div>
+    </div>
+
+    <!-- Post form -->
+    <form id="post-form" enctype="multipart/form-data">
+      <h1 id="form-title">New Post</h1>
+      <div id="alert"></div>
+
+      <div class="field"><label>Title</label><input type="text" id="title"></div>
+      <div class="field"><label>Content</label><textarea id="content"></textarea></div>
+
+      <div class="field">
+        <label>Photo</label>
+        <div class="photo-field">
+          <input type="file" id="photo" accept="image/*" onchange="previewPhoto(this)">
+          <div id="photo-preview" class="photo-preview" style="display:none">
+            <img id="preview-img" src="" alt="preview">
+            <button type="button" class="remove-photo" onclick="removePhoto()">✕</button>
+          </div>
+          <div id="imported-image-note" style="display:none" class="imported-note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            Image imported from article
+            <button type="button" onclick="clearImportedImage()" style="background:none;border:none;color:#e53e3e;cursor:pointer;font-size:.8rem;margin-left:.5rem">Remove</button>
+          </div>
+        </div>
+      </div>
+
+      <input type="hidden" id="imported-image-url" value="">
+
+      <button type="submit" class="btn btn-primary" style="width:100%" id="submit-btn">Save Post</button>
+    </form>
+  </div>
+</div>
+<script src="/js/api.js"></script>
+<script>
+  renderNav();
+  const user = getUser();
+  if (!user) window.location.href = '/pages/login.html';
+
+  api('/posts?limit=1').catch(() => { alert('Session expired. Please log in again.'); logout(); });
+
+  const params = new URLSearchParams(location.search);
+  const postId = params.get('id');
+  if (postId) {
+    document.getElementById('form-title').textContent = 'Edit Post';
+    api(`/posts/${postId}`).then(post => {
+      document.getElementById('title').value   = post.title;
+      document.getElementById('content').value = post.content;
+    });
+  }
+
+  // ── Import from URL ──────────────────────────────────────────────
+
+  const importFromUrl = async () => {
+    const url = document.getElementById('import-url').value.trim();
+    if (!url) return;
+    const btn    = document.getElementById('import-btn');
+    const status = document.getElementById('import-status');
+    btn.disabled = true;
+    btn.textContent = 'Importing…';
+    status.innerHTML = '';
+    try {
+      const data = await api('/scrape', { method: 'POST', body: JSON.stringify({ url }) });
+      if (data.title)   document.getElementById('title').value   = data.title;
+      if (data.content) document.getElementById('content').value = data.content;
+      if (data.imageUrl) {
+        document.getElementById('imported-image-url').value = data.imageUrl;
+        document.getElementById('imported-image-note').style.display = 'flex';
+        document.getElementById('photo').style.display = 'none';
+        // show preview
+        const preview = document.getElementById('photo-preview');
+        document.getElementById('preview-img').src = data.imageUrl;
+        preview.style.display = 'block';
+      }
+      status.innerHTML = '<span class="import-success">✓ Article imported successfully</span>';
+      document.getElementById('import-url').value = '';
+    } catch (err) {
+      status.innerHTML = `<span class="import-error">✕ ${err.message}</span>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Import';
+    }
+  };
+
+  document.getElementById('import-url').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); importFromUrl(); }
+  });
+
+  // ── Photo preview ────────────────────────────────────────────────
+
+  const previewPhoto = (input) => {
+    if (!input.files[0]) return;
+    clearImportedImage();
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      document.getElementById('preview-img').src = e.target.result;
+      document.getElementById('photo-preview').style.display = 'block';
+    };
+    reader.readAsDataURL(input.files[0]);
+  };
+
+  const removePhoto = () => {
+    document.getElementById('photo').value = '';
+    document.getElementById('photo-preview').style.display = 'none';
+  };
+
+  const clearImportedImage = () => {
+    document.getElementById('imported-image-url').value = '';
+    document.getElementById('imported-image-note').style.display = 'none';
+    document.getElementById('photo').style.display = 'block';
+    document.getElementById('photo-preview').style.display = 'none';
+  };
+
+  // ── Submit ───────────────────────────────────────────────────────
+
+  document.getElementById('post-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const alertEl = document.getElementById('alert');
+    const submitBtn = document.getElementById('submit-btn');
+    alertEl.innerHTML = '';
+
+    const title   = document.getElementById('title').value.trim();
+    const content = document.getElementById('content').value.trim();
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving…';
+
+    const fd = new FormData();
+    fd.append('title',   title);
+    fd.append('content', content);
+
+    const photo = document.getElementById('photo').files[0];
+    const importedImageUrl = document.getElementById('imported-image-url').value;
+
+    if (photo) {
+      fd.append('photo', photo);
+    } else if (importedImageUrl) {
+      fd.append('imageUrl', importedImageUrl);
+    }
+
+    try {
+      const method = postId ? 'PUT' : 'POST';
+      const path   = postId ? `/posts/${postId}` : '/posts';
+      const saved  = await api(path, { method, body: fd });
+      window.location.href = `/pages/post.html?id=${saved.data._id}`;
+    } catch (err) {
+      alertEl.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Save Post';
+    }
+  });
+</script>
+</body>
+</html>

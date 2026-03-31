@@ -1,0 +1,32 @@
+const addStudent = async (studentData, token) => {
+  
+  
+  
+  const url = 'http://localhost:5000/api/students'; // Your Node.js server address
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST', 
+      headers: {
+        'Content-Type': 'application/json',
+        // This is where you send your token
+        'Authorization': `Bearer ${token}` 
+      },
+      body: JSON.stringify(studentData)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Something went wrong');
+    }
+
+    const data = await response.json();
+    console.log('Success:', data);
+    return data;
+  } catch (error) {
+    console.error('Fetch Error:', error.message);
+  }
+
+
+  
+};
